@@ -20,7 +20,8 @@ target_include_directories(ct INTERFACE
 
 # consumers (cli, engine) use only: link Light + include <light/*.h>
 add_library(Light STATIC
-  libLight/src/light.cpp)
+  libLight/src/light.cpp
+  libLight/src/vm.cpp)
 target_include_directories(Light
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libLight/include
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libLight/src)
@@ -77,6 +78,11 @@ if(LIGHT_BUILD_TESTS)
   target_link_libraries(test_chunk PRIVATE Light)
   target_include_directories(test_chunk PRIVATE libLight/src)
   add_test(NAME chunk COMMAND test_chunk)
+
+  add_executable(test_vm tests/vm/test_vm.cpp)
+  target_link_libraries(test_vm PRIVATE Light)
+  target_include_directories(test_vm PRIVATE libLight/src)
+  add_test(NAME vm COMMAND test_vm)
 
   if(NOT WIN32)
     add_test(NAME check_includes

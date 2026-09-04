@@ -64,6 +64,11 @@ if(LIGHT_BUILD_TESTS)
   target_include_directories(test_value PRIVATE libLight/src)
   add_test(NAME value COMMAND test_value)
 
+  add_executable(test_lbc tests/lbc/test_lbc.cpp)
+  target_link_libraries(test_lbc PRIVATE Light)
+  target_include_directories(test_lbc PRIVATE libLight/src)
+  add_test(NAME lbc COMMAND test_lbc)
+
   if(NOT WIN32)
     add_test(NAME check_includes
       COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_includes.sh)

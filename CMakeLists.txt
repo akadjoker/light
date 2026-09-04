@@ -94,6 +94,11 @@ if(LIGHT_BUILD_TESTS)
   target_include_directories(test_natives PRIVATE libLight/src)
   add_test(NAME natives COMMAND test_natives)
 
+  add_executable(test_torture tests/vm/test_torture.cpp)
+  target_link_libraries(test_torture PRIVATE Light)
+  target_include_directories(test_torture PRIVATE libLight/src)
+  add_test(NAME torture COMMAND test_torture)
+
   if(NOT WIN32)
     add_test(NAME check_includes
       COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_includes.sh)

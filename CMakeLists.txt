@@ -84,6 +84,11 @@ if(LIGHT_BUILD_TESTS)
   target_include_directories(test_vm PRIVATE libLight/src)
   add_test(NAME vm COMMAND test_vm)
 
+  add_executable(test_calls tests/vm/test_calls.cpp)
+  target_link_libraries(test_calls PRIVATE Light)
+  target_include_directories(test_calls PRIVATE libLight/src)
+  add_test(NAME calls COMMAND test_calls)
+
   if(NOT WIN32)
     add_test(NAME check_includes
       COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_includes.sh)

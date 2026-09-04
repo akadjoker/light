@@ -18,9 +18,10 @@ namespace light
     {
         if (limits_valid_)
         {
-            regs_.reserve(limits.register_stack_slots);
+            main_.regs.reserve(limits.register_stack_slots);
             for (u32 i = 0; i < limits.register_stack_slots; i++)
-                regs_.push_back(Value::nil());
+                main_.regs.push_back(Value::nil());
+            main_.frames.reserve(limits.max_frames);
         }
     }
 
@@ -32,16 +33,36 @@ namespace light
         return Status::fail(code);
     }
 
+    Status Vm::execute(const Chunk& chunk)
+    {
+        Prototype entry{&chunk, 0, 0, (u16)REGISTERS_PER_FUNCTION};
+        Program program;
+        program.functions.push_back(entry);
+        program.entry = 0;
+        return execute(program);
+    }
+
 #define VM_FETCH()                                                                                 \
     do                                                                                             \
     {                                                                                              \
         if (pc >= count)                                                                           \
-            return fail(chunk, ErrorCode::CorruptBytecode, count ? count - 1 : 0);                 \
+            return fail(*chunk, ErrorCode::CorruptBytecode, count ? count - 1 : 0);                \
         cur = pc++;                                                                                \
         ins = code[cur];                                                                           \
         opcode = (u32)(ins & 0xFF);                                                                \
         if (opcode >= OP_COUNT)                                                                    \
-            return fail(chunk, ErrorCode::CorruptBytecode, cur);                                   \
+            return fail(*chunk, ErrorCode::CorruptBytecode, cur);                                  \
+    } while (0)
+
+#define VM_RELOAD_FRAME()                                                                          \
+    do                                                                                             \
+    {                                                                                              \
+        const CallFrame& fr = fiber.frames[fiber.frames.size() - 1];                               \
+        proto = fr.proto;                                                                          \
+        chunk = proto->chunk;                                                                      \
+        code = chunk->code.data();                                                                 \
+        count = (u32)chunk->code.size();                                                           \
+        base = fr.base;                                                                            \
     } while (0)
 
 #if LIGHT_COMPUTED_GOTO
@@ -58,23 +79,48 @@ namespace light
 #endif
 
 #define CHECK_INT2(rb, rc)                                                                         \
-    if (regs[rb].type != ValueType::Int || regs[rc].type != ValueType::Int)                        \
-    return fail(chunk, ErrorCode::TypeError, cur)
+    if (regs[base + (rb)].type != ValueType::Int || regs[base + (rc)].type != ValueType::Int)      \
+    return fail(*chunk, ErrorCode::TypeError, cur)
 #define CHECK_FLOAT2(rb, rc)                                                                       \
-    if (regs[rb].type != ValueType::Float || regs[rc].type != ValueType::Float)                    \
-    return fail(chunk, ErrorCode::TypeError, cur)
+    if (regs[base + (rb)].type != ValueType::Float || regs[base + (rc)].type != ValueType::Float)  \
+    return fail(*chunk, ErrorCode::TypeError, cur)
 #define CHECK_BOOL(r)                                                                              \
-    if (regs[r].type != ValueType::Bool)                                                           \
-    return fail(chunk, ErrorCode::TypeError, cur)
+    if (regs[base + (r)].type != ValueType::Bool)                                                  \
+    return fail(*chunk, ErrorCode::TypeError, cur)
 
-    Status Vm::execute(const Chunk& chunk)
+#define RA regs[base + decode_a(ins)]
+#define RB regs[base + decode_b(ins)]
+#define RC regs[base + decode_c(ins)]
+
+    Status Vm::execute(const Program& program)
     {
         if (!limits_valid_)
             return Status::fail(ErrorCode::InvalidLimits);
+        if (program.entry >= program.functions.size())
+        {
+            error_ = VmError{ErrorCode::CorruptBytecode, 0, 0};
+            return Status::fail(ErrorCode::CorruptBytecode);
+        }
 
-        const Instruction* code = chunk.code.data();
-        const u32 count = (u32)chunk.code.size();
-        Value* regs = regs_.data();
+        Fiber& fiber = main_;
+        Value* regs = fiber.regs.data();
+        const u32 reg_count_total = (u32)fiber.regs.size();
+
+        fiber.frames.clear();
+        const Prototype* entry_proto = &program.functions[program.entry];
+        if (entry_proto->register_count > reg_count_total)
+        {
+            error_ = VmError{ErrorCode::StackOverflow, 0, 0};
+            return Status::fail(ErrorCode::StackOverflow);
+        }
+        fiber.frames.push_back(CallFrame{entry_proto, 0, 0});
+
+        const Prototype* proto = nullptr;
+        const Chunk* chunk = nullptr;
+        const Instruction* code = nullptr;
+        u32 count = 0;
+        u32 base = 0;
+        VM_RELOAD_FRAME();
 
         u32 pc = 0;
         u32 cur = 0;
@@ -100,34 +146,34 @@ namespace light
 
         VM_CASE(LOAD_NIL)
         {
-            regs[decode_a(ins)] = Value::nil();
+            RA = Value::nil();
             VM_NEXT;
         }
 
         VM_CASE(LOAD_BOOL)
         {
-            regs[decode_a(ins)] = Value::boolean(decode_b(ins) != 0);
+            RA = Value::boolean(decode_b(ins) != 0);
             VM_NEXT;
         }
 
         VM_CASE(LOAD_INT16)
         {
-            regs[decode_a(ins)] = Value::integer((i64)decode_sbx(ins));
+            RA = Value::integer((i64)decode_sbx(ins));
             VM_NEXT;
         }
 
         VM_CASE(LOAD_CONST)
         {
             u16 bx = decode_bx(ins);
-            if (bx >= chunk.constants.size())
-                return fail(chunk, ErrorCode::CorruptBytecode, cur);
-            regs[decode_a(ins)] = chunk.constants[bx];
+            if (bx >= chunk->constants.size())
+                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
+            RA = chunk->constants[bx];
             VM_NEXT;
         }
 
         VM_CASE(MOVE)
         {
-            regs[decode_a(ins)] = regs[decode_b(ins)];
+            RA = RB;
             VM_NEXT;
         }
 
@@ -136,7 +182,7 @@ namespace light
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_INT2(b, c);
             // unsigned wrap keeps signed overflow defined
-            regs[decode_a(ins)] = Value::integer((i64)((u64)regs[b].as.i + (u64)regs[c].as.i));
+            RA = Value::integer((i64)((u64)regs[base + b].as.i + (u64)regs[base + c].as.i));
             VM_NEXT;
         }
 
@@ -144,7 +190,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_INT2(b, c);
-            regs[decode_a(ins)] = Value::integer((i64)((u64)regs[b].as.i - (u64)regs[c].as.i));
+            RA = Value::integer((i64)((u64)regs[base + b].as.i - (u64)regs[base + c].as.i));
             VM_NEXT;
         }
 
@@ -152,7 +198,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_INT2(b, c);
-            regs[decode_a(ins)] = Value::integer((i64)((u64)regs[b].as.i * (u64)regs[c].as.i));
+            RA = Value::integer((i64)((u64)regs[base + b].as.i * (u64)regs[base + c].as.i));
             VM_NEXT;
         }
 
@@ -160,12 +206,12 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_INT2(b, c);
-            i64 lhs = regs[b].as.i, rhs = regs[c].as.i;
+            i64 lhs = regs[base + b].as.i, rhs = regs[base + c].as.i;
             if (rhs == 0)
-                return fail(chunk, ErrorCode::DivisionByZero, cur);
+                return fail(*chunk, ErrorCode::DivisionByZero, cur);
             // INT64_MIN / -1 would trap on x86; wrap instead
             i64 result = (rhs == -1) ? (i64)(~(u64)lhs + 1) : lhs / rhs;
-            regs[decode_a(ins)] = Value::integer(result);
+            RA = Value::integer(result);
             VM_NEXT;
         }
 
@@ -173,7 +219,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_FLOAT2(b, c);
-            regs[decode_a(ins)] = Value::floating(regs[b].as.f + regs[c].as.f);
+            RA = Value::floating(regs[base + b].as.f + regs[base + c].as.f);
             VM_NEXT;
         }
 
@@ -181,7 +227,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_FLOAT2(b, c);
-            regs[decode_a(ins)] = Value::floating(regs[b].as.f - regs[c].as.f);
+            RA = Value::floating(regs[base + b].as.f - regs[base + c].as.f);
             VM_NEXT;
         }
 
@@ -189,7 +235,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_FLOAT2(b, c);
-            regs[decode_a(ins)] = Value::floating(regs[b].as.f * regs[c].as.f);
+            RA = Value::floating(regs[base + b].as.f * regs[base + c].as.f);
             VM_NEXT;
         }
 
@@ -198,31 +244,31 @@ namespace light
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_FLOAT2(b, c);
             // IEEE: x/0.0 is inf/nan, not an error
-            regs[decode_a(ins)] = Value::floating(regs[b].as.f / regs[c].as.f);
+            RA = Value::floating(regs[base + b].as.f / regs[base + c].as.f);
             VM_NEXT;
         }
 
         VM_CASE(NEG_INT)
         {
             u8 b = decode_b(ins);
-            if (regs[b].type != ValueType::Int)
-                return fail(chunk, ErrorCode::TypeError, cur);
-            regs[decode_a(ins)] = Value::integer((i64)(~(u64)regs[b].as.i + 1));
+            if (regs[base + b].type != ValueType::Int)
+                return fail(*chunk, ErrorCode::TypeError, cur);
+            RA = Value::integer((i64)(~(u64)regs[base + b].as.i + 1));
             VM_NEXT;
         }
 
         VM_CASE(NEG_FLOAT)
         {
             u8 b = decode_b(ins);
-            if (regs[b].type != ValueType::Float)
-                return fail(chunk, ErrorCode::TypeError, cur);
-            regs[decode_a(ins)] = Value::floating(-regs[b].as.f);
+            if (regs[base + b].type != ValueType::Float)
+                return fail(*chunk, ErrorCode::TypeError, cur);
+            RA = Value::floating(-regs[base + b].as.f);
             VM_NEXT;
         }
 
         VM_CASE(EQUAL)
         {
-            regs[decode_a(ins)] = Value::boolean(regs[decode_b(ins)].equals(regs[decode_c(ins)]));
+            RA = Value::boolean(RB.equals(RC));
             VM_NEXT;
         }
 
@@ -230,7 +276,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_INT2(b, c);
-            regs[decode_a(ins)] = Value::boolean(regs[b].as.i < regs[c].as.i);
+            RA = Value::boolean(regs[base + b].as.i < regs[base + c].as.i);
             VM_NEXT;
         }
 
@@ -238,7 +284,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_INT2(b, c);
-            regs[decode_a(ins)] = Value::boolean(regs[b].as.i <= regs[c].as.i);
+            RA = Value::boolean(regs[base + b].as.i <= regs[base + c].as.i);
             VM_NEXT;
         }
 
@@ -246,7 +292,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_FLOAT2(b, c);
-            regs[decode_a(ins)] = Value::boolean(regs[b].as.f < regs[c].as.f);
+            RA = Value::boolean(regs[base + b].as.f < regs[base + c].as.f);
             VM_NEXT;
         }
 
@@ -254,7 +300,7 @@ namespace light
         {
             u8 b = decode_b(ins), c = decode_c(ins);
             CHECK_FLOAT2(b, c);
-            regs[decode_a(ins)] = Value::boolean(regs[b].as.f <= regs[c].as.f);
+            RA = Value::boolean(regs[base + b].as.f <= regs[base + c].as.f);
             VM_NEXT;
         }
 
@@ -262,7 +308,7 @@ namespace light
         {
             u8 b = decode_b(ins);
             CHECK_BOOL(b);
-            regs[decode_a(ins)] = Value::boolean(!regs[b].as.b);
+            RA = Value::boolean(!regs[base + b].as.b);
             VM_NEXT;
         }
 
@@ -270,7 +316,7 @@ namespace light
         {
             i64 target = (i64)pc + decode_sbx(ins);
             if (target < 0 || target > (i64)count)
-                return fail(chunk, ErrorCode::CorruptBytecode, cur);
+                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
             pc = (u32)target;
             VM_NEXT;
         }
@@ -279,11 +325,11 @@ namespace light
         {
             u8 a = decode_a(ins);
             CHECK_BOOL(a);
-            if (regs[a].as.b)
+            if (regs[base + a].as.b)
             {
                 i64 target = (i64)pc + decode_sbx(ins);
                 if (target < 0 || target > (i64)count)
-                    return fail(chunk, ErrorCode::CorruptBytecode, cur);
+                    return fail(*chunk, ErrorCode::CorruptBytecode, cur);
                 pc = (u32)target;
             }
             VM_NEXT;
@@ -293,20 +339,51 @@ namespace light
         {
             u8 a = decode_a(ins);
             CHECK_BOOL(a);
-            if (!regs[a].as.b)
+            if (!regs[base + a].as.b)
             {
                 i64 target = (i64)pc + decode_sbx(ins);
                 if (target < 0 || target > (i64)count)
-                    return fail(chunk, ErrorCode::CorruptBytecode, cur);
+                    return fail(*chunk, ErrorCode::CorruptBytecode, cur);
                 pc = (u32)target;
             }
             VM_NEXT;
         }
 
+        VM_CASE(CALL)
+        {
+            u16 idx = decode_bx(ins);
+            if (idx >= program.functions.size())
+                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
+            const Prototype* callee = &program.functions[idx];
+            u32 new_base = base + decode_a(ins);
+            if (fiber.frames.size() >= limits_.max_frames)
+                return fail(*chunk, ErrorCode::StackOverflow, cur);
+            if (new_base + callee->register_count > reg_count_total)
+                return fail(*chunk, ErrorCode::StackOverflow, cur);
+
+            fiber.frames[fiber.frames.size() - 1].pc = pc;
+            fiber.frames.push_back(CallFrame{callee, new_base, 0});
+            VM_RELOAD_FRAME();
+            pc = 0;
+            VM_NEXT;
+        }
+
         VM_CASE(RETURN)
         {
-            // no call frames yet (M2): ends execution, results stay in registers
-            return Status::success();
+            u8 a = decode_a(ins);
+            u8 n = proto->result_count;
+            if (base + a + n > reg_count_total)
+                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
+            // results land at the window start, exactly where the caller expects
+            for (u8 i = 0; i < n; i++)
+                regs[base + i] = regs[base + a + i];
+
+            if (fiber.frames.size() == 1)
+                return Status::success();
+            fiber.frames.pop_back();
+            VM_RELOAD_FRAME();
+            pc = fiber.frames[fiber.frames.size() - 1].pc;
+            VM_NEXT;
         }
 
         VM_CASE(HALT) { return Status::success(); }

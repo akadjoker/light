@@ -33,5 +33,6 @@ OP(JUMP, AsBx)            // pc += sBx
 OP(JUMP_IF_TRUE, AsBx)    // if R[A] then pc += sBx
 OP(JUMP_IF_FALSE, AsBx)
 
-OP(RETURN, ABC)           // return R[A..A+B-1], B = result_count
+OP(CALL, ABx)             // call functions[Bx]; window at R[A]: args in, results out
+OP(RETURN, ABC)           // copy R[A..A+result_count-1] to window start, pop frame
 OP(HALT, ABC)

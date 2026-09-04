@@ -1,0 +1,103 @@
+name: ci
+
+on:
+  pull_request:
+    paths:
+      - '**'
+      - '!README.md'
+      - '!docs/**'
+      - '!plano.md'
+      - '!estudos/**'
+      - '.github/workflows/ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '!README.md'
+      - '!docs/**'
+      - '!plano.md'
+      - '!estudos/**'
+      - '.github/workflows/ci.yml'
+
+env:
+  ASAN_OPTIONS: halt_on_error=1
+  UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+jobs:
+  check-includes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check forbidden includes
+        run: sh tools/check_includes.sh
+
+  linux:
+    runs-on: ubuntu-latest
+    name: linux (${{ matrix.config.cc }} ${{ matrix.config.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { name: Debug, cc: gcc, cxx: g++, type: Debug }
+          - { name: Release, cc: gcc, cxx: g++, type: Release }
+          - { name: Debug, cc: clang, cxx: clang++, type: Debug }
+          - { name: Release, cc: clang, cxx: clang++, type: Release }
+          - { name: asan+ubsan, cc: clang, cxx: clang++, type: RelWithDebInfo, sanitize: true }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: configure
+        env:
+          CC: ${{ matrix.config.cc }}
+          CXX: ${{ matrix.config.cxx }}
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.config.type }}
+          -DLIGHT_ENABLE_ASAN=${{ matrix.config.sanitize && 'ON' || 'OFF' }}
+          -DLIGHT_ENABLE_UBSAN=${{ matrix.config.sanitize && 'ON' || 'OFF' }}
+      - name: build
+        run: cmake --build build -j
+      - name: test
+        run: ctest --test-dir build --output-on-failure
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: build
+        run: cmake --build build -j
+      - name: test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: configure
+        run: cmake -B build
+      - name: build
+        run: cmake --build build --config ${{ matrix.type }} -j
+      - name: test
+        run: ctest --test-dir build -C ${{ matrix.type }} --output-on-failure
+
+  api-header:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: light_api.h compila sozinho em C++14 estrito
+        run: |
+          echo '#include "light_api.h"' > /tmp/api_only.cpp
+          echo 'int main() { return 0; }' >> /tmp/api_only.cpp
+          g++ -std=c++14 -Isrc -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti -c /tmp/api_only.cpp -o /tmp/api_only.o

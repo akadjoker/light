@@ -94,6 +94,11 @@ if(LIGHT_BUILD_TESTS)
   target_include_directories(test_natives PRIVATE libLight/src)
   add_test(NAME natives COMMAND test_natives)
 
+  add_executable(test_verify tests/vm/test_verify.cpp)
+  target_link_libraries(test_verify PRIVATE Light)
+  target_include_directories(test_verify PRIVATE libLight/src)
+  add_test(NAME verify COMMAND test_verify)
+
   add_executable(test_torture tests/vm/test_torture.cpp)
   target_link_libraries(test_torture PRIVATE Light)
   target_include_directories(test_torture PRIVATE libLight/src)

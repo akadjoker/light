@@ -13,6 +13,7 @@ namespace light
     constexpr u32 DEFAULT_MAX_FRAMES = 256;
     constexpr u32 DEFAULT_MAX_CONSTANTS = 65536;
     constexpr u32 DEFAULT_MAX_INSTRUCTIONS = 1u << 20;
+    constexpr u64 DEFAULT_INSTRUCTION_BUDGET = 0; // 0 = unlimited
     constexpr u32 DEFAULT_MAX_PARSE_DEPTH = 200;
     constexpr u32 DEFAULT_MAX_AST_NODES = 1u << 20;
     constexpr u32 DEFAULT_MAX_DIAGNOSTICS = 100;
@@ -23,7 +24,11 @@ namespace light
         u32 register_stack_slots = DEFAULT_REGISTER_STACK_SLOTS; // Value slots for all frames
         u32 max_frames = DEFAULT_MAX_FRAMES;                     // call depth
         u32 max_constants = DEFAULT_MAX_CONSTANTS;               // per chunk; LOAD_CONST Bx is u16
-        u32 max_instructions = DEFAULT_MAX_INSTRUCTIONS;         // per function
+        u32 max_instructions = DEFAULT_MAX_INSTRUCTIONS;         // chunk size, per function
+        // instructions one execute() may run before it is stopped. Bounds run
+        // time, unlike max_instructions which bounds code size: a small chunk
+        // can loop forever. 0 = unlimited, for hosts that trust their bytecode.
+        u64 instruction_budget = DEFAULT_INSTRUCTION_BUDGET;
         u32 max_parse_depth = DEFAULT_MAX_PARSE_DEPTH;
         u32 max_ast_nodes = DEFAULT_MAX_AST_NODES;
         u32 max_diagnostics = DEFAULT_MAX_DIAGNOSTICS;

@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "verify.h"
 
 // computed goto where available, switch fallback on MSVC; each handler ends
 // with its own indirect jump so the branch predictor gets one site per opcode
@@ -101,16 +102,19 @@ namespace light
         return execute(program);
     }
 
+// verify() guarantees every opcode decodes and every operand is in range, so
+// what remains per instruction is the budget and the end-of-chunk bound:
+// dead code after a RETURN is legal, so running off the end is still possible
 #define VM_FETCH()                                                                                 \
     do                                                                                             \
     {                                                                                              \
+        if (budget-- == 0)                                                                         \
+            return fail(*chunk, ErrorCode::InstructionLimit, cur);                                 \
         if (pc >= count)                                                                           \
             return fail(*chunk, ErrorCode::CorruptBytecode, count ? count - 1 : 0);                \
         cur = pc++;                                                                                \
         ins = code[cur];                                                                           \
         opcode = (u32)(ins & 0xFF);                                                                \
-        if (opcode >= OP_COUNT)                                                                    \
-            return fail(*chunk, ErrorCode::CorruptBytecode, cur);                                  \
     } while (0)
 
 #define VM_RELOAD_FRAME()                                                                          \
@@ -174,8 +178,18 @@ namespace light
             error_ = VmError{ErrorCode::CorruptBytecode, 0, 0};
             return Status::fail(ErrorCode::CorruptBytecode);
         }
+        Status verified = verify(program, (u32)natives_.size(), limits_, nullptr);
+        if (!verified.ok())
+        {
+            error_ = VmError{verified.code, 0, 0};
+            return verified;
+        }
         executing_ = true;
         ExecGuard guard{&executing_};
+
+        // verify() bounds code size; this bounds how long a loop may run.
+        // 0 means unlimited, so start the counter high enough never to trip.
+        u64 budget = limits_.instruction_budget ? limits_.instruction_budget : ~(u64)0;
 
         Fiber& fiber = main_;
         Value* regs = fiber.regs;
@@ -239,10 +253,7 @@ namespace light
 
         VM_CASE(LOAD_CONST)
         {
-            u16 bx = decode_bx(ins);
-            if (bx >= chunk->constants.size())
-                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
-            RA = chunk->constants[bx];
+            RA = chunk->constants[decode_bx(ins)];
             VM_NEXT;
         }
 
@@ -389,10 +400,7 @@ namespace light
 
         VM_CASE(JUMP)
         {
-            i64 target = (i64)pc + decode_sbx(ins);
-            if (target < 0 || target > (i64)count)
-                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
-            pc = (u32)target;
+            pc = (u32)((i64)pc + decode_sbx(ins));
             VM_NEXT;
         }
 
@@ -402,10 +410,7 @@ namespace light
             CHECK_BOOL(a);
             if (regs[base + a].as.b)
             {
-                i64 target = (i64)pc + decode_sbx(ins);
-                if (target < 0 || target > (i64)count)
-                    return fail(*chunk, ErrorCode::CorruptBytecode, cur);
-                pc = (u32)target;
+                pc = (u32)((i64)pc + decode_sbx(ins));
             }
             VM_NEXT;
         }
@@ -416,20 +421,14 @@ namespace light
             CHECK_BOOL(a);
             if (!regs[base + a].as.b)
             {
-                i64 target = (i64)pc + decode_sbx(ins);
-                if (target < 0 || target > (i64)count)
-                    return fail(*chunk, ErrorCode::CorruptBytecode, cur);
-                pc = (u32)target;
+                pc = (u32)((i64)pc + decode_sbx(ins));
             }
             VM_NEXT;
         }
 
         VM_CASE(CALL)
         {
-            u16 idx = decode_bx(ins);
-            if (idx >= program.functions.size())
-                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
-            const Prototype* callee = &program.functions[idx];
+            const Prototype* callee = &program.functions[decode_bx(ins)];
             u32 new_base = base + decode_a(ins);
             if (fiber.frame_depth >= fiber.frame_capacity)
                 return fail(*chunk, ErrorCode::StackOverflow, cur);
@@ -445,10 +444,7 @@ namespace light
 
         VM_CASE(CALL_NATIVE)
         {
-            u16 idx = decode_bx(ins);
-            if (idx >= natives_.size())
-                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
-            const NativeDescriptor& native = natives_[idx];
+            const NativeDescriptor& native = natives_[decode_bx(ins)];
             u32 window = base + decode_a(ins);
             u8 span =
                 native.param_count > native.result_count ? native.param_count : native.result_count;
@@ -472,9 +468,6 @@ namespace light
         {
             u8 a = decode_a(ins);
             u8 n = proto->result_count;
-            // results must come from inside this function's own window
-            if ((u32)a + n > proto->register_count)
-                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
             // results land at the window start, exactly where the caller expects
             for (u8 i = 0; i < n; i++)
                 regs[base + i] = regs[base + a + i];

@@ -107,22 +107,45 @@ static void test_window_at_exact_stack_end()
     VmLimits limits;
     limits.register_stack_slots = 512;
 
+    // callee calls again, so the second window would start at 255 + 255
     Chunk callee;
+    callee.write(encode_abx(Op::CALL, 255, 2), 1);
     callee.write(encode_abc(Op::RETURN, 0, 0, 0), 1);
+
+    Chunk leaf;
+    leaf.write(encode_abc(Op::RETURN, 0, 0, 0), 1);
 
     Chunk main_ok;
     main_ok.write(encode_abx(Op::CALL, 255, 1), 1);
-    main_ok.write(encode_abx(Op::CALL, 255, 2), 1); // window 255+... second callee 257 regs
     main_ok.write(encode_abc(Op::HALT, 0, 0, 0), 1);
 
     Program prog;
     prog.functions.push_back(Prototype{&main_ok, 0, 0, 256});
     prog.functions.push_back(Prototype{&callee, 0, 0, 256}); // 255 + 256 = 511 <= 512 ok
-    prog.functions.push_back(Prototype{&callee, 0, 0, 258}); // 255 + 258 = 513 > 512 fails
+    prog.functions.push_back(Prototype{&leaf, 0, 0, 256});   // nested: 510 + 256 > 512 fails
 
+    // the second CALL runs from inside the first callee (base 255), so its
+    // window starts at 510 and cannot fit another 256-register frame
     Vm vm(config, limits);
     CHECK(vm.execute(prog).code == ErrorCode::StackOverflow);
-    CHECK(vm.last_error().pc == 1); // first call succeeded, second overflowed
+    CHECK(vm.last_error().pc == 0); // the failing CALL is the callee's first instruction
+}
+
+// register_count above REGISTERS_PER_FUNCTION is unencodable: A/B/C are u8
+static void test_register_count_above_max_rejected()
+{
+    VmConfig config = {};
+    VmLimits limits;
+    limits.register_stack_slots = 1024;
+
+    Chunk c;
+    c.write(encode_abc(Op::HALT, 0, 0, 0), 1);
+
+    Program prog;
+    prog.functions.push_back(Prototype{&c, 0, 0, 257});
+
+    Vm vm(config, limits);
+    CHECK(vm.execute(prog).code == ErrorCode::TooManyRegisters);
 }
 
 static void test_frame_depth_exact_limit()
@@ -176,10 +199,11 @@ static void test_constant_index_boundaries()
     c.write(encode_abx(Op::LOAD_CONST, 1, 300), 1); // first invalid
     c.write(encode_abc(Op::HALT, 0, 0, 0), 1);
 
+    // verify() rejects the bad index before anything runs, so the valid load
+    // that precedes it never takes effect either
     Vm vm = make_vm();
     CHECK(vm.execute(c).code == ErrorCode::CorruptBytecode);
-    CHECK(vm.reg(0).as_int() == 299); // first load happened
-    CHECK(vm.last_error().pc == 1);
+    CHECK(vm.reg(0).is_nil());
 }
 
 // ---- adversarial control flow ----
@@ -301,7 +325,7 @@ struct Lcg
 static void test_fuzz_random_bytecode()
 {
     Lcg rng{0xC0FFEEull};
-    u32 executed_ok = 0, errored = 0;
+    u32 executed_ok = 0, errored = 0, load_rejected = 0;
 
     for (u32 prog_i = 0; prog_i < 2000; prog_i++)
     {
@@ -317,9 +341,35 @@ static void test_fuzz_random_bytecode()
             u32 raw = rng.next();
             u8 op = (u8)(raw % OP_COUNT);
             Instruction ins = (raw & 0xFFFFFF00u) | op;
-            // forward-only jumps guarantee termination
-            if (op == (u8)Op::JUMP || op == (u8)Op::JUMP_IF_TRUE || op == (u8)Op::JUMP_IF_FALSE)
-                ins = encode_asbx((Op)op, decode_a(ins), (i16)(rng.next() % 16));
+
+            // Keep operands inside what verify() accepts, so the fuzz reaches
+            // the interpreter instead of stopping at the load-time check. What
+            // stays random is the *dynamic* behaviour: types, values, control
+            // flow and the order operations see registers in.
+            switch ((Op)op)
+            {
+            case Op::JUMP:
+            case Op::JUMP_IF_TRUE:
+            case Op::JUMP_IF_FALSE:
+            {
+                // forward-only, and never past the trailing HALT
+                u32 room = len - i; // distance to the HALT at index len
+                ins = encode_asbx((Op)op, decode_a(ins), (i16)(rng.next() % (room + 1)));
+                break;
+            }
+            case Op::LOAD_CONST:
+                ins = encode_abx(Op::LOAD_CONST, decode_a(ins),
+                                 (u16)(rng.next() % c.constants.size()));
+                break;
+            case Op::CALL:
+            case Op::CALL_NATIVE:
+                // no functions or natives are registered here; those paths have
+                // their own tests. Keep the slot busy with a NOP.
+                ins = encode_abc(Op::NOP, 0, 0, 0);
+                break;
+            default:
+                break;
+            }
             c.write(ins, i + 1);
         }
         c.write(encode_abc(Op::HALT, 0, 0, 0), len + 1);
@@ -331,15 +381,24 @@ static void test_fuzz_random_bytecode()
         else
         {
             errored++;
+            if (s.code == ErrorCode::CorruptBytecode)
+                load_rejected++;
             CHECK(vm.last_error().code == s.code);
             CHECK(vm.last_error().pc <= len); // error location always inside the chunk
         }
     }
 
-    // sanity: the generator produces both outcomes, so both paths are exercised
-    CHECK(executed_ok > 0);
-    CHECK(errored > 0);
-    printf("fuzz: %u ok, %u errored, 0 crashes\n", executed_ok, errored);
+    // The generator must keep exercising the interpreter, not just the loader.
+    // Registers start as nil and every arithmetic opcode is typed, so most
+    // random programs legitimately end in TypeError; what matters is that they
+    // fail *while running* rather than being rejected at load. This asserts the
+    // generator has not drifted back into producing bytecode verify() throws
+    // out: with the current seed it yields ~236 clean runs and ~2 load-time
+    // rejections out of 2000.
+    CHECK(executed_ok > 100);
+    CHECK(load_rejected < 20);
+    printf("fuzz: %u ok, %u errored (%u rejected at load), 0 crashes\n", executed_ok, errored,
+           load_rejected);
 }
 
 int main()
@@ -348,6 +407,7 @@ int main()
     test_float_specials();
     test_register_255_usable();
     test_window_at_exact_stack_end();
+    test_register_count_above_max_rejected();
     test_frame_depth_exact_limit();
     test_constant_index_boundaries();
     test_jump_to_exact_end_is_missing_halt();

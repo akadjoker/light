@@ -85,6 +85,8 @@ namespace light
         Vm& operator=(const Vm&) = delete;
         Vm& operator=(Vm&&) = delete;
 
+        // Every execute() verifies the program first, so natives registered
+        // between runs are always reflected in the CALL_NATIVE bounds check.
         Status execute(const Program& program);
         Status execute(const Chunk& chunk); // single-chunk convenience, entry has full window
 

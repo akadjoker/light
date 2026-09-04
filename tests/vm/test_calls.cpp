@@ -173,6 +173,24 @@ static void test_deep_window_overflows_registers()
     CHECK(vm.execute(prog).code == ErrorCode::StackOverflow);
 }
 
+static void test_return_outside_own_window_rejected()
+{
+    // register_count 4, but RETURN claims the result lives at r200
+    Chunk fn;
+    fn.write(encode_abc(Op::RETURN, 200, 0, 0), 1);
+
+    Chunk main_chunk;
+    main_chunk.write(encode_abx(Op::CALL, 0, 1), 1);
+    main_chunk.write(encode_abc(Op::HALT, 0, 0, 0), 2);
+
+    Program prog;
+    prog.functions.push_back(Prototype{&main_chunk, 0, 0, 8});
+    prog.functions.push_back(Prototype{&fn, 0, 1, 4});
+
+    Vm vm = make_vm();
+    CHECK(vm.execute(prog).code == ErrorCode::CorruptBytecode);
+}
+
 static void test_bad_function_index()
 {
     Chunk main_chunk;
@@ -203,6 +221,7 @@ int main()
     test_void_call();
     test_infinite_recursion_overflows();
     test_deep_window_overflows_registers();
+    test_return_outside_own_window_rejected();
     test_bad_function_index();
     test_bad_entry_index();
 

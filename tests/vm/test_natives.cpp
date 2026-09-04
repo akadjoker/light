@@ -196,6 +196,34 @@ static void test_mixed_native_kinds()
     CHECK(vm.reg(0).as_int() == 42);
 }
 
+static Status native_tries_reentry(Vm& vm, void* ud, Value* slots)
+{
+    (void)slots;
+    Chunk* inner = (Chunk*)ud;
+    Status s = vm.execute(*inner);
+    if (s.code != ErrorCode::ReentrantExecution)
+        return Status::fail(ErrorCode::TypeError); // wrong outcome, fail the test via VM
+    return Status::success();
+}
+
+static void test_reentrant_execute_rejected()
+{
+    Chunk inner;
+    inner.write(encode_abc(Op::HALT, 0, 0, 0), 1);
+
+    Vm vm = make_vm();
+    u32 idx = vm.register_native("reenter", native_tries_reentry, &inner, 0, 0);
+
+    Chunk outer;
+    outer.write(encode_abx(Op::CALL_NATIVE, 0, (u16)idx), 1);
+    outer.write(encode_asbx(Op::LOAD_INT16, 0, 42), 2);
+    outer.write(encode_abc(Op::HALT, 0, 0, 0), 3);
+
+    // inner execute fails cleanly, outer execution continues unharmed
+    CHECK(vm.execute(outer).ok());
+    CHECK(vm.reg(0).as_int() == 42);
+}
+
 static void test_bad_native_index()
 {
     Vm vm = make_vm();
@@ -216,6 +244,7 @@ int main()
     test_native_called_from_function();
     test_simple_native_no_status();
     test_mixed_native_kinds();
+    test_reentrant_execute_rejected();
     test_bad_native_index();
 
     if (failures == 0)

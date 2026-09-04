@@ -102,6 +102,7 @@ namespace light
         VmConfig config_;
         VmLimits limits_;
         bool limits_valid_;
+        bool executing_ = false; // natives must not call execute() re-entrantly
         Fiber main_;
         ct::Vector<NativeDescriptor> natives_;
         VmError error_{ErrorCode::Ok, 0, 0};

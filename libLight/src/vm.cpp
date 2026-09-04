@@ -151,15 +151,31 @@ namespace light
 #define RB regs[base + decode_b(ins)]
 #define RC regs[base + decode_c(ins)]
 
+    namespace
+    {
+        struct ExecGuard
+        {
+            bool* flag;
+            ~ExecGuard() { *flag = false; }
+        };
+    } // namespace
+
     Status Vm::execute(const Program& program)
     {
         if (!limits_valid_)
             return Status::fail(ErrorCode::InvalidLimits);
+        if (executing_)
+        {
+            error_ = VmError{ErrorCode::ReentrantExecution, 0, 0};
+            return Status::fail(ErrorCode::ReentrantExecution);
+        }
         if (program.entry >= program.functions.size())
         {
             error_ = VmError{ErrorCode::CorruptBytecode, 0, 0};
             return Status::fail(ErrorCode::CorruptBytecode);
         }
+        executing_ = true;
+        ExecGuard guard{&executing_};
 
         Fiber& fiber = main_;
         Value* regs = fiber.regs;
@@ -456,7 +472,8 @@ namespace light
         {
             u8 a = decode_a(ins);
             u8 n = proto->result_count;
-            if (base + a + n > reg_count_total)
+            // results must come from inside this function's own window
+            if ((u32)a + n > proto->register_count)
                 return fail(*chunk, ErrorCode::CorruptBytecode, cur);
             // results land at the window start, exactly where the caller expects
             for (u8 i = 0; i < n; i++)

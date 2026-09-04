@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string.h>
+
 #include <light/light_types.h>
 
 namespace light
@@ -65,6 +67,14 @@ namespace light
     inline u8 decode_b(Instruction i) { return (u8)((i >> 16) & 0xFF); }
     inline u8 decode_c(Instruction i) { return (u8)((i >> 24) & 0xFF); }
     inline u16 decode_bx(Instruction i) { return (u16)(i >> 16); }
-    inline i16 decode_sbx(Instruction i) { return (i16)(u16)(i >> 16); }
+    // memcpy instead of a narrowing cast: the cast is implementation-defined
+    // for values > 32767, this is portable by contract and compiles the same
+    inline i16 decode_sbx(Instruction i)
+    {
+        u16 raw = (u16)(i >> 16);
+        i16 v;
+        memcpy(&v, &raw, sizeof(v));
+        return v;
+    }
 
 } // namespace light

@@ -73,6 +73,11 @@ if(LIGHT_BUILD_TESTS)
   target_link_libraries(test_limits PRIVATE Light)
   add_test(NAME limits COMMAND test_limits)
 
+  add_executable(test_chunk tests/chunk/test_chunk.cpp)
+  target_link_libraries(test_chunk PRIVATE Light)
+  target_include_directories(test_chunk PRIVATE libLight/src)
+  add_test(NAME chunk COMMAND test_chunk)
+
   if(NOT WIN32)
     add_test(NAME check_includes
       COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_includes.sh)

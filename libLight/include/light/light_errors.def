@@ -35,6 +35,9 @@ ERR(UnsupportedVersion)
 ERR(ChecksumMismatch)
 ERR(CorruptBytecode)
 
+// config
+ERR(InvalidLimits)
+
 // runtime
 ERR(OutOfMemory)
 ERR(StackOverflow)

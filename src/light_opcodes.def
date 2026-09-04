@@ -1,0 +1,37 @@
+// X-macro opcode list: OP(name, format)
+// Single source for the enum, dispatch table, disassembler and validation.
+// Pre-1.0 the numbering is unstable; after 1.0 append-only, never reorder.
+
+OP(NOP, ABC)
+
+OP(LOAD_NIL, ABC)         // R[A] = nil
+OP(LOAD_BOOL, ABC)        // R[A] = B != 0
+OP(LOAD_INT16, AsBx)      // R[A] = (i64)sBx
+OP(LOAD_CONST, ABx)       // R[A] = constants[Bx]
+
+OP(MOVE, ABC)             // R[A] = R[B]
+
+OP(ADD_INT, ABC)          // R[A] = R[B] + R[C] (i64)
+OP(SUB_INT, ABC)
+OP(MUL_INT, ABC)
+OP(DIV_INT, ABC)
+OP(ADD_FLOAT, ABC)        // R[A] = R[B] + R[C] (f64)
+OP(SUB_FLOAT, ABC)
+OP(MUL_FLOAT, ABC)
+OP(DIV_FLOAT, ABC)
+OP(NEG_INT, ABC)          // R[A] = -R[B]
+OP(NEG_FLOAT, ABC)
+
+OP(EQUAL, ABC)            // R[A] = R[B] == R[C]
+OP(LESS_INT, ABC)         // R[A] = R[B] < R[C]
+OP(LESS_EQUAL_INT, ABC)
+OP(LESS_FLOAT, ABC)
+OP(LESS_EQUAL_FLOAT, ABC)
+OP(NOT, ABC)              // R[A] = !R[B]
+
+OP(JUMP, AsBx)            // pc += sBx
+OP(JUMP_IF_TRUE, AsBx)    // if R[A] then pc += sBx
+OP(JUMP_IF_FALSE, AsBx)
+
+OP(RETURN, ABC)           // return R[A..A+B-1], B = result_count
+OP(HALT, ABC)

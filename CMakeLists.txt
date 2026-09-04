@@ -47,6 +47,10 @@ if(LIGHT_BUILD_TESTS)
   target_link_libraries(test_foundation PRIVATE light)
   add_test(NAME foundation COMMAND test_foundation)
 
+  add_executable(test_bytecode tests/bytecode/test_encoding.cpp)
+  target_link_libraries(test_bytecode PRIVATE light)
+  add_test(NAME bytecode COMMAND test_bytecode)
+
   if(NOT WIN32)
     add_test(NAME check_includes
       COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_includes.sh)

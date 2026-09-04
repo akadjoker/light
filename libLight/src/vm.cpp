@@ -33,6 +33,13 @@ namespace light
         return Status::fail(code);
     }
 
+    u32 Vm::register_native(const char* name, NativeFn fn, void* ud, u8 param_count,
+                            u8 result_count)
+    {
+        natives_.push_back(NativeDescriptor{fn, ud, name, param_count, result_count});
+        return (u32)natives_.size() - 1;
+    }
+
     Status Vm::execute(const Chunk& chunk)
     {
         Prototype entry{&chunk, 0, 0, (u16)REGISTERS_PER_FUNCTION};
@@ -365,6 +372,24 @@ namespace light
             fiber.frames.push_back(CallFrame{callee, new_base, 0});
             VM_RELOAD_FRAME();
             pc = 0;
+            VM_NEXT;
+        }
+
+        VM_CASE(CALL_NATIVE)
+        {
+            u16 idx = decode_bx(ins);
+            if (idx >= natives_.size())
+                return fail(*chunk, ErrorCode::CorruptBytecode, cur);
+            const NativeDescriptor& native = natives_[idx];
+            u32 window = base + decode_a(ins);
+            u8 span =
+                native.param_count > native.result_count ? native.param_count : native.result_count;
+            if (window + span > reg_count_total)
+                return fail(*chunk, ErrorCode::StackOverflow, cur);
+
+            Status status = native.fn(*this, native.ud, &regs[window]);
+            if (!status.ok())
+                return fail(*chunk, status.code, cur);
             VM_NEXT;
         }
 

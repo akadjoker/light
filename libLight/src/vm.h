@@ -47,6 +47,21 @@ namespace light
         u32 line;
     };
 
+    class Vm;
+
+    // args arrive in slots[0..param_count), results are written to
+    // slots[0..result_count) — same window convention as script calls
+    using NativeFn = Status (*)(Vm& vm, void* ud, Value* slots);
+
+    struct NativeDescriptor
+    {
+        NativeFn fn;
+        void* ud;
+        const char* name; // diagnostics only, never looked up in the hot path
+        u8 param_count;
+        u8 result_count;
+    };
+
     class Vm
     {
       public:
@@ -54,6 +69,9 @@ namespace light
 
         Status execute(const Program& program);
         Status execute(const Chunk& chunk); // single-chunk convenience, entry has full window
+
+        u32 register_native(const char* name, NativeFn fn, void* ud, u8 param_count,
+                            u8 result_count);
 
         const VmError& last_error() const { return error_; }
         Value reg(u32 i) const { return main_.regs[i]; }
@@ -65,6 +83,7 @@ namespace light
         VmLimits limits_;
         bool limits_valid_;
         Fiber main_;
+        ct::Vector<NativeDescriptor> natives_;
         VmError error_{ErrorCode::Ok, 0, 0};
     };
 

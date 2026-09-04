@@ -91,7 +91,8 @@ namespace light
 
     Vm::Vm(Vm&& other)
         : config_(other.config_), limits_(other.limits_), main_(other.main_),
-          natives_(static_cast<ct::Vector<NativeDescriptor>&&>(other.natives_)), error_(other.error_)
+          natives_(static_cast<ct::Vector<NativeDescriptor>&&>(other.natives_)),
+          error_(other.error_)
     {
         other.main_ = Fiber{};
     }

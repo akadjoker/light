@@ -366,8 +366,8 @@ namespace
 {
     struct FailingAlloc
     {
-        u32 allow;    // succeed this many times, then refuse
-        u32 live;     // outstanding allocations, to prove nothing leaks
+        u32 allow; // succeed this many times, then refuse
+        u32 live;  // outstanding allocations, to prove nothing leaks
         static void* fn(void* ud, void* ptr, usize, usize new_size)
         {
             FailingAlloc* self = (FailingAlloc*)ud;

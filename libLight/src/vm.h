@@ -60,7 +60,14 @@ namespace light
     class Vm;
 
     // args arrive in slots[0..param_count), results are written to
-    // slots[0..result_count) — same window convention as script calls
+    // slots[0..result_count) — same window convention as script calls.
+    //
+    // param_count and result_count are a contract the VM trusts, not one it
+    // enforces: only max(param, result) slots are checked against the register
+    // stack, so a native that writes past its declared result_count silently
+    // clobbers the caller's registers. Natives are host C++ code, held to the
+    // same standard as the rest of the embedding, and checking every slot on
+    // every call would cost more than it protects against.
     using NativeFn = Status (*)(Vm& vm, void* ud, Value* slots);     // fallible
     using NativeFnSimple = void (*)(Vm& vm, void* ud, Value* slots); // cannot fail
 
@@ -114,6 +121,11 @@ namespace light
                             u8 result_count);
 
         const VmError& last_error() const { return error_; }
+
+        // Registers are not cleared between runs: this is how a host reads
+        // results back after execute(), and it means values from one program
+        // stay visible to the next one run on the same VM. Use a fresh VM to
+        // run untrusted bytecode that must not see the previous run's data.
         Value reg(u32 i) const { return main_.regs[i]; }
 
       private:

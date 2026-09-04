@@ -231,6 +231,54 @@ static void test_bad_native_index()
     CHECK(vm.execute(c).code == ErrorCode::CorruptBytecode);
 }
 
+// ---- documented contracts ----
+
+// param_count / result_count are trusted, not enforced: this pins the
+// behaviour the header describes so a future change to it is deliberate
+static Status native_writes_past_results(Vm&, void*, Value* slots)
+{
+    for (u32 i = 0; i < 4; i++)
+        slots[i] = Value::integer(777);
+    return Status::success();
+}
+
+static void test_native_result_count_is_trusted_not_enforced()
+{
+    Chunk c;
+    c.write(encode_abx(Op::CALL_NATIVE, 0, 0), 1);
+    c.write(encode_abc(Op::HALT, 0, 0, 0), 2);
+
+    Vm vm = make_vm();
+    vm.register_native("over", native_writes_past_results, nullptr, 1, 1);
+
+    Program prog;
+    prog.functions.push_back(Prototype{&c, 0, 0, 8});
+    CHECK(vm.execute(prog).ok());
+    // the native wrote 4 slots while declaring 1; the VM did not stop it
+    CHECK(vm.reg(3).as_int() == 777);
+}
+
+// registers carry over between runs, which is how a host reads results back
+static void test_registers_persist_across_runs()
+{
+    Chunk first;
+    first.write(encode_asbx(Op::LOAD_INT16, 3, 1234), 1);
+    first.write(encode_abc(Op::HALT, 0, 0, 0), 2);
+
+    Chunk second;
+    second.write(encode_abc(Op::HALT, 0, 0, 0), 1);
+
+    Program prog_first;
+    prog_first.functions.push_back(Prototype{&first, 0, 0, 8});
+    Program prog_second;
+    prog_second.functions.push_back(Prototype{&second, 0, 0, 8});
+
+    Vm vm = make_vm();
+    CHECK(vm.execute(prog_first).ok());
+    CHECK(vm.execute(prog_second).ok());
+    CHECK(vm.reg(3).as_int() == 1234); // untouched by the second run
+}
+
 int main()
 {
     test_native_add();
@@ -242,6 +290,8 @@ int main()
     test_mixed_native_kinds();
     test_reentrant_execute_rejected();
     test_bad_native_index();
+    test_native_result_count_is_trusted_not_enforced();
+    test_registers_persist_across_runs();
 
     if (failures == 0)
     {

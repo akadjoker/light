@@ -227,8 +227,7 @@ static void test_invalid_limits_rejected()
     // create() reports the bad limits itself, rather than handing back a VM
     // that only fails once something is executed on it
     Vm vm;
-    CHECK(Vm::create(light::testing::test_config(), limits, &vm).code ==
-          ErrorCode::InvalidLimits);
+    CHECK(Vm::create(light::testing::test_config(), limits, &vm).code == ErrorCode::InvalidLimits);
 }
 
 // a VM that was never successfully created owns no register stack

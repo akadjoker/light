@@ -1,0 +1,44 @@
+// X-macro error code list: ERR(name)
+// Tests compare codes + positions, never message text.
+
+ERR(Ok)
+
+// lexer
+ERR(UnexpectedCharacter)
+ERR(UnterminatedString)
+ERR(UnterminatedComment)
+ERR(InvalidEscape)
+ERR(InvalidNumber)
+ERR(NumberOverflow)
+
+// parser
+ERR(UnexpectedToken)
+ERR(NestingTooDeep)
+ERR(TooManyNodes)
+ERR(TooManyDiagnostics)
+
+// type check
+ERR(UnknownSymbol)
+ERR(UnknownType)
+ERR(TypeMismatch)
+ERR(ArityMismatch)
+ERR(InvalidDiscard)
+
+// compiler limits
+ERR(TooManyConstants)
+ERR(TooManyRegisters)
+ERR(BytecodeTooLarge)
+
+// .lbc loader
+ERR(BadMagic)
+ERR(UnsupportedVersion)
+ERR(ChecksumMismatch)
+ERR(CorruptBytecode)
+
+// runtime
+ERR(OutOfMemory)
+ERR(StackOverflow)
+ERR(DivisionByZero)
+ERR(IndexOutOfBounds)
+ERR(InvalidHandle)
+ERR(TypeError)

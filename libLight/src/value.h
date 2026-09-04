@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light_types.h"
+#include <light/light_types.h>
 
 namespace light
 {

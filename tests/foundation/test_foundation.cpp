@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "light_api.h"
-#include "light_types.h"
+#include <light/light_api.h>
+#include <light/light_types.h>
 
 #include <ct/arena.hpp>
 #include <ct/hashmap.hpp>

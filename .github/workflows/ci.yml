@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: clang-format check
-        run: clang-format --dry-run --Werror src/*.h src/*.cpp tests/*/*.cpp
+        run: clang-format --dry-run --Werror libLight/include/light/*.h libLight/src/*.h libLight/src/*.cpp tests/*/*.cpp
 
   linux:
     runs-on: ubuntu-latest
@@ -103,8 +103,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: light_api.h compila sozinho em C++14 estrito
+      - name: light_api.h compiles standalone in strict C++14
         run: |
-          echo '#include "light_api.h"' > /tmp/api_only.cpp
+          echo "#include <light/light_api.h>" > /tmp/api_only.cpp
           echo 'int main() { return 0; }' >> /tmp/api_only.cpp
-          g++ -std=c++14 -Isrc -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti -c /tmp/api_only.cpp -o /tmp/api_only.o
+          g++ -std=c++14 -IlibLight/include -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti -c /tmp/api_only.cpp -o /tmp/api_only.o

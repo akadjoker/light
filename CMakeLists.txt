@@ -18,9 +18,12 @@ add_library(ct INTERFACE)
 target_include_directories(ct INTERFACE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/containers/include)
 
+# consumers (cli, engine) use only: link Light + include <light/*.h>
 add_library(Light STATIC
-  src/light.cpp)
-target_include_directories(Light PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  libLight/src/light.cpp)
+target_include_directories(Light
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libLight/include
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libLight/src)
 target_link_libraries(Light PUBLIC ct)
 
 if(MSVC)
@@ -49,6 +52,7 @@ if(LIGHT_BUILD_TESTS)
 
   add_executable(test_bytecode tests/bytecode/test_encoding.cpp)
   target_link_libraries(test_bytecode PRIVATE Light)
+  target_include_directories(test_bytecode PRIVATE libLight/src)
   add_test(NAME bytecode COMMAND test_bytecode)
 
   add_executable(test_error tests/error/test_error.cpp)
@@ -57,6 +61,7 @@ if(LIGHT_BUILD_TESTS)
 
   add_executable(test_value tests/value/test_value.cpp)
   target_link_libraries(test_value PRIVATE Light)
+  target_include_directories(test_value PRIVATE libLight/src)
   add_test(NAME value COMMAND test_value)
 
   if(NOT WIN32)

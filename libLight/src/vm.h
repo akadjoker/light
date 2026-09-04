@@ -33,11 +33,18 @@ namespace light
     };
 
     // all execution state lives here, never on the C++ stack: a coroutine
-    // later is just another Fiber, and yield/resume swaps the active one
+    // later is just another Fiber, and yield/resume swaps the active one.
+    // Both stacks are allocated once at fiber creation and never grow.
     struct Fiber
     {
-        ct::Vector<Value> regs;
-        ct::Vector<CallFrame> frames;
+        Value* regs = nullptr;
+        CallFrame* frames = nullptr;
+        u32 reg_count = 0;
+        u32 frame_capacity = 0;
+        u32 frame_depth = 0;
+
+        void init(u32 regs_n, u32 frames_n);
+        void release();
     };
 
     struct VmError
@@ -51,26 +58,39 @@ namespace light
 
     // args arrive in slots[0..param_count), results are written to
     // slots[0..result_count) — same window convention as script calls
-    using NativeFn = Status (*)(Vm& vm, void* ud, Value* slots);
+    using NativeFn = Status (*)(Vm& vm, void* ud, Value* slots);     // fallible
+    using NativeFnSimple = void (*)(Vm& vm, void* ud, Value* slots); // cannot fail
 
     struct NativeDescriptor
     {
-        NativeFn fn;
+        union
+        {
+            NativeFn checked;
+            NativeFnSimple simple;
+        } fn;
         void* ud;
         const char* name; // diagnostics only, never looked up in the hot path
         u8 param_count;
         u8 result_count;
+        bool can_fail;
     };
 
     class Vm
     {
       public:
         Vm(const VmConfig& config, const VmLimits& limits);
+        Vm(Vm&& other);
+        ~Vm();
+        Vm(const Vm&) = delete;
+        Vm& operator=(const Vm&) = delete;
+        Vm& operator=(Vm&&) = delete;
 
         Status execute(const Program& program);
         Status execute(const Chunk& chunk); // single-chunk convenience, entry has full window
 
         u32 register_native(const char* name, NativeFn fn, void* ud, u8 param_count,
+                            u8 result_count);
+        u32 register_native(const char* name, NativeFnSimple fn, void* ud, u8 param_count,
                             u8 result_count);
 
         const VmError& last_error() const { return error_; }

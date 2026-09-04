@@ -13,17 +13,48 @@
 namespace light
 {
 
+    void Fiber::init(u32 regs_n, u32 frames_n)
+    {
+        ct::HeapAlloc alloc;
+        regs = (Value*)alloc.allocate(regs_n * sizeof(Value), alignof(Value));
+        frames = (CallFrame*)alloc.allocate(frames_n * sizeof(CallFrame), alignof(CallFrame));
+        reg_count = regs_n;
+        frame_capacity = frames_n;
+        frame_depth = 0;
+        for (u32 i = 0; i < regs_n; i++)
+            regs[i] = Value::nil();
+    }
+
+    void Fiber::release()
+    {
+        ct::HeapAlloc alloc;
+        if (regs)
+            alloc.deallocate(regs, reg_count * sizeof(Value));
+        if (frames)
+            alloc.deallocate(frames, frame_capacity * sizeof(CallFrame));
+        regs = nullptr;
+        frames = nullptr;
+        reg_count = 0;
+        frame_capacity = 0;
+        frame_depth = 0;
+    }
+
     Vm::Vm(const VmConfig& config, const VmLimits& limits)
         : config_(config), limits_(limits), limits_valid_(limits.validate().ok())
     {
         if (limits_valid_)
-        {
-            main_.regs.reserve(limits.register_stack_slots);
-            for (u32 i = 0; i < limits.register_stack_slots; i++)
-                main_.regs.push_back(Value::nil());
-            main_.frames.reserve(limits.max_frames);
-        }
+            main_.init(limits.register_stack_slots, limits.max_frames);
     }
+
+    Vm::Vm(Vm&& other)
+        : config_(other.config_), limits_(other.limits_), limits_valid_(other.limits_valid_),
+          main_(other.main_), natives_(static_cast<ct::Vector<NativeDescriptor>&&>(other.natives_)),
+          error_(other.error_)
+    {
+        other.main_ = Fiber{};
+    }
+
+    Vm::~Vm() { main_.release(); }
 
     Status Vm::fail(const Chunk& chunk, ErrorCode code, u32 at)
     {
@@ -36,7 +67,28 @@ namespace light
     u32 Vm::register_native(const char* name, NativeFn fn, void* ud, u8 param_count,
                             u8 result_count)
     {
-        natives_.push_back(NativeDescriptor{fn, ud, name, param_count, result_count});
+        NativeDescriptor d;
+        d.fn.checked = fn;
+        d.ud = ud;
+        d.name = name;
+        d.param_count = param_count;
+        d.result_count = result_count;
+        d.can_fail = true;
+        natives_.push_back(d);
+        return (u32)natives_.size() - 1;
+    }
+
+    u32 Vm::register_native(const char* name, NativeFnSimple fn, void* ud, u8 param_count,
+                            u8 result_count)
+    {
+        NativeDescriptor d;
+        d.fn.simple = fn;
+        d.ud = ud;
+        d.name = name;
+        d.param_count = param_count;
+        d.result_count = result_count;
+        d.can_fail = false;
+        natives_.push_back(d);
         return (u32)natives_.size() - 1;
     }
 
@@ -64,7 +116,7 @@ namespace light
 #define VM_RELOAD_FRAME()                                                                          \
     do                                                                                             \
     {                                                                                              \
-        const CallFrame& fr = fiber.frames[fiber.frames.size() - 1];                               \
+        const CallFrame& fr = fiber.frames[fiber.frame_depth - 1];                                 \
         proto = fr.proto;                                                                          \
         chunk = proto->chunk;                                                                      \
         code = chunk->code.data();                                                                 \
@@ -110,17 +162,17 @@ namespace light
         }
 
         Fiber& fiber = main_;
-        Value* regs = fiber.regs.data();
-        const u32 reg_count_total = (u32)fiber.regs.size();
+        Value* regs = fiber.regs;
+        const u32 reg_count_total = fiber.reg_count;
 
-        fiber.frames.clear();
         const Prototype* entry_proto = &program.functions[program.entry];
         if (entry_proto->register_count > reg_count_total)
         {
             error_ = VmError{ErrorCode::StackOverflow, 0, 0};
             return Status::fail(ErrorCode::StackOverflow);
         }
-        fiber.frames.push_back(CallFrame{entry_proto, 0, 0});
+        fiber.frames[0] = CallFrame{entry_proto, 0, 0};
+        fiber.frame_depth = 1;
 
         const Prototype* proto = nullptr;
         const Chunk* chunk = nullptr;
@@ -363,13 +415,13 @@ namespace light
                 return fail(*chunk, ErrorCode::CorruptBytecode, cur);
             const Prototype* callee = &program.functions[idx];
             u32 new_base = base + decode_a(ins);
-            if (fiber.frames.size() >= limits_.max_frames)
+            if (fiber.frame_depth >= fiber.frame_capacity)
                 return fail(*chunk, ErrorCode::StackOverflow, cur);
             if (new_base + callee->register_count > reg_count_total)
                 return fail(*chunk, ErrorCode::StackOverflow, cur);
 
-            fiber.frames[fiber.frames.size() - 1].pc = pc;
-            fiber.frames.push_back(CallFrame{callee, new_base, 0});
+            fiber.frames[fiber.frame_depth - 1].pc = pc;
+            fiber.frames[fiber.frame_depth++] = CallFrame{callee, new_base, 0};
             VM_RELOAD_FRAME();
             pc = 0;
             VM_NEXT;
@@ -387,9 +439,16 @@ namespace light
             if (window + span > reg_count_total)
                 return fail(*chunk, ErrorCode::StackOverflow, cur);
 
-            Status status = native.fn(*this, native.ud, &regs[window]);
-            if (!status.ok())
-                return fail(*chunk, status.code, cur);
+            if (native.can_fail)
+            {
+                Status status = native.fn.checked(*this, native.ud, &regs[window]);
+                if (!status.ok())
+                    return fail(*chunk, status.code, cur);
+            }
+            else
+            {
+                native.fn.simple(*this, native.ud, &regs[window]);
+            }
             VM_NEXT;
         }
 
@@ -403,11 +462,11 @@ namespace light
             for (u8 i = 0; i < n; i++)
                 regs[base + i] = regs[base + a + i];
 
-            if (fiber.frames.size() == 1)
+            if (fiber.frame_depth == 1)
                 return Status::success();
-            fiber.frames.pop_back();
+            fiber.frame_depth--;
             VM_RELOAD_FRAME();
-            pc = fiber.frames[fiber.frames.size() - 1].pc;
+            pc = fiber.frames[fiber.frame_depth - 1].pc;
             VM_NEXT;
         }
 

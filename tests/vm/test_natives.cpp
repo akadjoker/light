@@ -156,6 +156,46 @@ static void test_native_called_from_function()
     CHECK(vm.reg(0).as_int() == 42);
 }
 
+static void native_simple_scale(Vm& vm, void* ud, Value* slots)
+{
+    (void)vm;
+    i64 factor = *(i64*)ud;
+    slots[0] = Value::integer(slots[0].as_int() * factor);
+}
+
+static void test_simple_native_no_status()
+{
+    i64 factor = 3;
+    Vm vm = make_vm();
+    u32 idx = vm.register_native("scale", native_simple_scale, &factor, 1, 1);
+
+    Chunk c;
+    c.write(encode_asbx(Op::LOAD_INT16, 0, 14), 1);
+    c.write(encode_abx(Op::CALL_NATIVE, 0, (u16)idx), 2);
+    c.write(encode_abc(Op::HALT, 0, 0, 0), 3);
+
+    CHECK(vm.execute(c).ok());
+    CHECK(vm.reg(0).as_int() == 42);
+}
+
+static void test_mixed_native_kinds()
+{
+    i64 factor = 2;
+    Vm vm = make_vm();
+    u32 add_idx = vm.register_native("add", native_add, nullptr, 2, 1);
+    u32 scale_idx = vm.register_native("scale", native_simple_scale, &factor, 1, 1);
+
+    Chunk c;
+    c.write(encode_asbx(Op::LOAD_INT16, 0, 20), 1);
+    c.write(encode_asbx(Op::LOAD_INT16, 1, 1), 1);
+    c.write(encode_abx(Op::CALL_NATIVE, 0, (u16)add_idx), 2);
+    c.write(encode_abx(Op::CALL_NATIVE, 0, (u16)scale_idx), 3);
+    c.write(encode_abc(Op::HALT, 0, 0, 0), 4);
+
+    CHECK(vm.execute(c).ok());
+    CHECK(vm.reg(0).as_int() == 42);
+}
+
 static void test_bad_native_index()
 {
     Vm vm = make_vm();
@@ -174,6 +214,8 @@ int main()
     test_native_userdata_context();
     test_native_error_propagates();
     test_native_called_from_function();
+    test_simple_native_no_status();
+    test_mixed_native_kinds();
     test_bad_native_index();
 
     if (failures == 0)

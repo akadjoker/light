@@ -36,8 +36,7 @@ namespace light
         void* print_ud;
 
         // the VM never keeps out->bytes; it always calls release_module when done
-        bool (*load_module)(void* ud, const char* name, u32 name_len,
-                            ModuleSource* out);
+        bool (*load_module)(void* ud, const char* name, u32 name_len, ModuleSource* out);
         void (*release_module)(void* ud, ModuleSource* src);
         void* loader_ud;
     };

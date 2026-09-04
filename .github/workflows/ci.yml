@@ -32,6 +32,13 @@ jobs:
       - name: check forbidden includes
         run: sh tools/check_includes.sh
 
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format check
+        run: clang-format --dry-run --Werror src/*.h src/*.cpp tests/*/*.cpp
+
   linux:
     runs-on: ubuntu-latest
     name: linux (${{ matrix.config.cc }} ${{ matrix.config.name }})

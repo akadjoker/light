@@ -58,10 +58,7 @@ namespace light
         return (u32)op | ((u32)a << 8) | ((u32)bx << 16);
     }
 
-    inline Instruction encode_asbx(Op op, u8 a, i16 sbx)
-    {
-        return encode_abx(op, a, (u16)sbx);
-    }
+    inline Instruction encode_asbx(Op op, u8 a, i16 sbx) { return encode_abx(op, a, (u16)sbx); }
 
     inline Op decode_op(Instruction i) { return (Op)(i & 0xFF); }
     inline u8 decode_a(Instruction i) { return (u8)((i >> 8) & 0xFF); }

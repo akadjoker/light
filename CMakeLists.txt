@@ -55,6 +55,10 @@ if(LIGHT_BUILD_TESTS)
   target_link_libraries(test_error PRIVATE light)
   add_test(NAME error COMMAND test_error)
 
+  add_executable(test_value tests/value/test_value.cpp)
+  target_link_libraries(test_value PRIVATE light)
+  add_test(NAME value COMMAND test_value)
+
   if(NOT WIN32)
     add_test(NAME check_includes
       COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_includes.sh)

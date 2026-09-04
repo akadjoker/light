@@ -494,8 +494,9 @@ Decalcado dos workflows do quickjs-ng (`estudos/quickjs/.github/workflows/`):
 ## Estrutura proposta
 
 ```text
-src/
-	light_api.h              API publica para o host
+libLight/
+	include/light/           headers publicos: light_api.h, light_types.h, error.h
+	src/                     interno; consumidores (cli, engine) usam so a lib + includes publicos
 	vm.h / vm.cpp            loop de execucao e frames
 	value.h                  Value e operacoes de tipo
 	bytecode.h               opcodes, Chunk e Prototype

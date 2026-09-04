@@ -1,8 +1,11 @@
+#include "test_vm_support.h"
+
 #include <stdio.h>
 
 #include "vm.h"
 
 using namespace light;
+using light::testing::make_vm;
 
 static int failures = 0;
 
@@ -15,13 +18,6 @@ static int failures = 0;
             failures++;                                                                            \
         }                                                                                          \
     } while (0)
-
-static Vm make_vm()
-{
-    VmConfig config = {};
-    VmLimits limits;
-    return Vm(config, limits);
-}
 
 static Status native_add(Vm& vm, void* ud, Value* slots)
 {

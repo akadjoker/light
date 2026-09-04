@@ -14,25 +14,38 @@
 namespace light
 {
 
-    void Fiber::init(u32 regs_n, u32 frames_n)
+    Status Fiber::init(const VmConfig& config, u32 regs_n, u32 frames_n)
     {
-        ct::HeapAlloc alloc;
-        regs = (Value*)alloc.allocate(regs_n * sizeof(Value), alignof(Value));
-        frames = (CallFrame*)alloc.allocate(frames_n * sizeof(CallFrame), alignof(CallFrame));
+        // sizes are u32 but the products can exceed 32 bits, so compute in usize
+        const usize regs_bytes = (usize)regs_n * sizeof(Value);
+        const usize frames_bytes = (usize)frames_n * sizeof(CallFrame);
+
+        regs = (Value*)config.alloc(config.alloc_ud, nullptr, 0, regs_bytes);
+        if (!regs)
+            return Status::fail(ErrorCode::OutOfMemory);
+
+        frames = (CallFrame*)config.alloc(config.alloc_ud, nullptr, 0, frames_bytes);
+        if (!frames)
+        {
+            config.alloc(config.alloc_ud, regs, regs_bytes, 0);
+            regs = nullptr;
+            return Status::fail(ErrorCode::OutOfMemory);
+        }
+
         reg_count = regs_n;
         frame_capacity = frames_n;
         frame_depth = 0;
         for (u32 i = 0; i < regs_n; i++)
             regs[i] = Value::nil();
+        return Status::success();
     }
 
-    void Fiber::release()
+    void Fiber::release(const VmConfig& config)
     {
-        ct::HeapAlloc alloc;
         if (regs)
-            alloc.deallocate(regs, reg_count * sizeof(Value));
+            config.alloc(config.alloc_ud, regs, (usize)reg_count * sizeof(Value), 0);
         if (frames)
-            alloc.deallocate(frames, frame_capacity * sizeof(CallFrame));
+            config.alloc(config.alloc_ud, frames, (usize)frame_capacity * sizeof(CallFrame), 0);
         regs = nullptr;
         frames = nullptr;
         reg_count = 0;
@@ -40,22 +53,50 @@ namespace light
         frame_depth = 0;
     }
 
-    Vm::Vm(const VmConfig& config, const VmLimits& limits)
-        : config_(config), limits_(limits), limits_valid_(limits.validate().ok())
+    Vm::Vm(const VmConfig& config, const VmLimits& limits) : config_(config), limits_(limits) {}
+
+    Vm::Vm() : config_(), limits_() {}
+
+    Vm& Vm::operator=(Vm&& other)
     {
-        if (limits_valid_)
-            main_.init(limits.register_stack_slots, limits.max_frames);
+        if (this == &other)
+            return *this;
+        main_.release(config_);
+        config_ = other.config_;
+        limits_ = other.limits_;
+        main_ = other.main_;
+        natives_ = static_cast<ct::Vector<NativeDescriptor>&&>(other.natives_);
+        error_ = other.error_;
+        other.main_ = Fiber{};
+        return *this;
+    }
+
+    Status Vm::create(const VmConfig& config, const VmLimits& limits, Vm* out)
+    {
+        if (!out || !config.alloc)
+            return Status::fail(ErrorCode::InvalidLimits);
+
+        Status limits_ok = limits.validate();
+        if (!limits_ok.ok())
+            return limits_ok;
+
+        Vm vm(config, limits);
+        Status allocated = vm.main_.init(config, limits.register_stack_slots, limits.max_frames);
+        if (!allocated.ok())
+            return allocated;
+
+        *out = static_cast<Vm&&>(vm);
+        return Status::success();
     }
 
     Vm::Vm(Vm&& other)
-        : config_(other.config_), limits_(other.limits_), limits_valid_(other.limits_valid_),
-          main_(other.main_), natives_(static_cast<ct::Vector<NativeDescriptor>&&>(other.natives_)),
-          error_(other.error_)
+        : config_(other.config_), limits_(other.limits_), main_(other.main_),
+          natives_(static_cast<ct::Vector<NativeDescriptor>&&>(other.natives_)), error_(other.error_)
     {
         other.main_ = Fiber{};
     }
 
-    Vm::~Vm() { main_.release(); }
+    Vm::~Vm() { main_.release(config_); }
 
     Status Vm::fail(const Chunk& chunk, ErrorCode code, u32 at)
     {
@@ -166,8 +207,11 @@ namespace light
 
     Status Vm::execute(const Program& program)
     {
-        if (!limits_valid_)
+        if (!main_.regs)
+        {
+            error_ = VmError{ErrorCode::InvalidLimits, 0, 0};
             return Status::fail(ErrorCode::InvalidLimits);
+        }
         if (executing_)
         {
             error_ = VmError{ErrorCode::ReentrantExecution, 0, 0};

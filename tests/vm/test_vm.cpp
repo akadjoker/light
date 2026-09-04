@@ -1,8 +1,11 @@
+#include "test_vm_support.h"
+
 #include <stdio.h>
 
 #include "vm.h"
 
 using namespace light;
+using light::testing::make_vm;
 
 static int failures = 0;
 
@@ -15,13 +18,6 @@ static int failures = 0;
             failures++;                                                                            \
         }                                                                                          \
     } while (0)
-
-static Vm make_vm()
-{
-    VmConfig config = {};
-    VmLimits limits;
-    return Vm(config, limits);
-}
 
 static void test_int_arithmetic()
 {
@@ -225,13 +221,32 @@ static void test_return_ends_execution()
 
 static void test_invalid_limits_rejected()
 {
-    VmConfig config = {};
     VmLimits limits;
     limits.max_frames = 0;
-    Vm vm(config, limits);
+
+    // create() reports the bad limits itself, rather than handing back a VM
+    // that only fails once something is executed on it
+    Vm vm;
+    CHECK(Vm::create(light::testing::test_config(), limits, &vm).code ==
+          ErrorCode::InvalidLimits);
+}
+
+// a VM that was never successfully created owns no register stack
+static void test_uninitialised_vm_refuses_to_execute()
+{
     Chunk c;
     c.write(encode_abc(Op::HALT, 0, 0, 0), 1);
+
+    Vm vm;
     CHECK(vm.execute(c).code == ErrorCode::InvalidLimits);
+}
+
+// alloc is the host's only hook for memory; without it there is no VM
+static void test_missing_allocator_rejected()
+{
+    VmConfig config = {}; // no alloc callback
+    Vm vm;
+    CHECK(Vm::create(config, VmLimits{}, &vm).code == ErrorCode::InvalidLimits);
 }
 
 int main()
@@ -250,6 +265,8 @@ int main()
     test_rejects_jump_out_of_bounds();
     test_return_ends_execution();
     test_invalid_limits_rejected();
+    test_uninitialised_vm_refuses_to_execute();
+    test_missing_allocator_rejected();
 
     if (failures == 0)
     {

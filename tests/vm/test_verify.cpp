@@ -1,9 +1,12 @@
 #include "verify.h"
 #include "vm.h"
 
+#include "test_vm_support.h"
+
 #include <stdio.h>
 
 using namespace light;
+using light::testing::make_vm;
 
 static int failures = 0;
 
@@ -16,12 +19,6 @@ static int failures = 0;
             failures++;                                                                            \
         }                                                                                          \
     } while (0)
-
-static Vm make_vm(VmLimits limits = VmLimits{})
-{
-    VmConfig config = {};
-    return Vm(config, limits);
-}
 
 // ---- register operands must stay inside the frame's own window ----
 
@@ -363,6 +360,85 @@ static void test_default_budget_is_unlimited()
     CHECK(make_vm().execute(prog).ok());
 }
 
+// ---- allocation failure is reported, never fatal ----
+
+namespace
+{
+    struct FailingAlloc
+    {
+        u32 allow;    // succeed this many times, then refuse
+        u32 live;     // outstanding allocations, to prove nothing leaks
+        static void* fn(void* ud, void* ptr, usize, usize new_size)
+        {
+            FailingAlloc* self = (FailingAlloc*)ud;
+            if (new_size == 0)
+            {
+                if (ptr)
+                    self->live--;
+                free(ptr);
+                return nullptr;
+            }
+            if (self->allow == 0)
+                return nullptr;
+            self->allow--;
+            void* p = realloc(ptr, new_size);
+            if (p)
+                self->live++;
+            return p;
+        }
+    };
+} // namespace
+
+// the register stack is the first allocation: refusing it must not be fatal
+static void test_oom_on_register_stack_reported()
+{
+    FailingAlloc alloc{0, 0};
+    VmConfig config = {};
+    config.alloc = FailingAlloc::fn;
+    config.alloc_ud = &alloc;
+
+    Vm vm;
+    CHECK(Vm::create(config, VmLimits{}, &vm).code == ErrorCode::OutOfMemory);
+    CHECK(alloc.live == 0);
+}
+
+// the frame stack is the second: the register stack must be handed back
+static void test_oom_on_frame_stack_releases_registers()
+{
+    FailingAlloc alloc{1, 0}; // first allocation succeeds, second fails
+    VmConfig config = {};
+    config.alloc = FailingAlloc::fn;
+    config.alloc_ud = &alloc;
+
+    Vm vm;
+    CHECK(Vm::create(config, VmLimits{}, &vm).code == ErrorCode::OutOfMemory);
+    CHECK(alloc.live == 0); // the register stack was freed on the way out
+}
+
+// the host's allocator is the one actually used, and everything comes back
+static void test_vm_uses_host_allocator()
+{
+    FailingAlloc alloc{16, 0};
+    VmConfig config = {};
+    config.alloc = FailingAlloc::fn;
+    config.alloc_ud = &alloc;
+
+    {
+        Vm vm;
+        CHECK(Vm::create(config, VmLimits{}, &vm).ok());
+        CHECK(alloc.live == 2); // register stack + frame stack
+
+        Chunk c;
+        c.write(encode_asbx(Op::LOAD_INT16, 0, 42), 1);
+        c.write(encode_abc(Op::HALT, 0, 0, 0), 2);
+        Program prog;
+        prog.functions.push_back(Prototype{&c, 0, 0, 4});
+        CHECK(vm.execute(prog).ok());
+        CHECK(vm.reg(0).as_int() == 42);
+    }
+    CHECK(alloc.live == 0); // the destructor returned both stacks
+}
+
 int main()
 {
     test_register_operand_beyond_window_rejected();
@@ -387,6 +463,10 @@ int main()
     test_too_many_constants_rejected();
     test_bytecode_too_large_rejected();
     test_result_count_beyond_window_rejected();
+
+    test_oom_on_register_stack_reported();
+    test_oom_on_frame_stack_releases_registers();
+    test_vm_uses_host_allocator();
 
     test_budget_counts_across_calls();
     test_budget_and_size_are_independent();

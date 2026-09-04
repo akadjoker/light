@@ -1,8 +1,11 @@
+#include "test_vm_support.h"
+
 #include <stdio.h>
 
 #include "vm.h"
 
 using namespace light;
+using light::testing::make_vm;
 
 static int failures = 0;
 
@@ -15,13 +18,6 @@ static int failures = 0;
             failures++;                                                                            \
         }                                                                                          \
     } while (0)
-
-static Vm make_vm()
-{
-    VmConfig config = {};
-    VmLimits limits;
-    return Vm(config, limits);
-}
 
 // ---- integer extremes: every wrap must be defined and exact ----
 
@@ -103,7 +99,6 @@ static void test_register_255_usable()
 static void test_window_at_exact_stack_end()
 {
     // stack 512: window at 256 with register_count 256 fits exactly; 257 does not
-    VmConfig config = {};
     VmLimits limits;
     limits.register_stack_slots = 512;
 
@@ -126,7 +121,7 @@ static void test_window_at_exact_stack_end()
 
     // the second CALL runs from inside the first callee (base 255), so its
     // window starts at 510 and cannot fit another 256-register frame
-    Vm vm(config, limits);
+    Vm vm = make_vm(limits);
     CHECK(vm.execute(prog).code == ErrorCode::StackOverflow);
     CHECK(vm.last_error().pc == 0); // the failing CALL is the callee's first instruction
 }
@@ -134,7 +129,6 @@ static void test_window_at_exact_stack_end()
 // register_count above REGISTERS_PER_FUNCTION is unencodable: A/B/C are u8
 static void test_register_count_above_max_rejected()
 {
-    VmConfig config = {};
     VmLimits limits;
     limits.register_stack_slots = 1024;
 
@@ -144,7 +138,7 @@ static void test_register_count_above_max_rejected()
     Program prog;
     prog.functions.push_back(Prototype{&c, 0, 0, 257});
 
-    Vm vm(config, limits);
+    Vm vm = make_vm(limits);
     CHECK(vm.execute(prog).code == ErrorCode::TooManyRegisters);
 }
 
@@ -152,7 +146,6 @@ static void test_frame_depth_exact_limit()
 {
     // chain: fn[i] calls fn[i+1]; last one returns. With max_frames = 4,
     // a chain of depth exactly 4 succeeds and depth 5 fails.
-    VmConfig config = {};
     VmLimits limits;
     limits.max_frames = 4;
 
@@ -173,7 +166,7 @@ static void test_frame_depth_exact_limit()
         prog.functions.push_back(Prototype{&call_next[1], 0, 0, 4});
         prog.functions.push_back(Prototype{&call_next[2], 0, 0, 4});
         prog.functions.push_back(Prototype{&leaf, 0, 0, 4});
-        Vm vm(config, limits);
+        Vm vm = make_vm(limits);
         CHECK(vm.execute(prog).ok());
     }
 
@@ -185,7 +178,7 @@ static void test_frame_depth_exact_limit()
         prog.functions.push_back(Prototype{&call_next[2], 0, 0, 4});
         prog.functions.push_back(Prototype{&call_next[3], 0, 0, 4});
         prog.functions.push_back(Prototype{&leaf, 0, 0, 4});
-        Vm vm(config, limits);
+        Vm vm = make_vm(limits);
         CHECK(vm.execute(prog).code == ErrorCode::StackOverflow);
     }
 }

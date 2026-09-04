@@ -18,15 +18,15 @@ add_library(ct INTERFACE)
 target_include_directories(ct INTERFACE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/containers/include)
 
-add_library(light STATIC
+add_library(Light STATIC
   src/light.cpp)
-target_include_directories(light PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(light PUBLIC ct)
+target_include_directories(Light PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(Light PUBLIC ct)
 
 if(MSVC)
-  target_compile_options(light PRIVATE /W4 /WX /GR-)
+  target_compile_options(Light PRIVATE /W4 /WX /GR-)
 else()
-  target_compile_options(light PRIVATE
+  target_compile_options(Light PRIVATE
     -Wall -Wextra -Werror -pedantic
     -fno-exceptions -fno-rtti)
 endif()
@@ -44,19 +44,19 @@ if(LIGHT_BUILD_TESTS)
   enable_testing()
 
   add_executable(test_foundation tests/foundation/test_foundation.cpp)
-  target_link_libraries(test_foundation PRIVATE light)
+  target_link_libraries(test_foundation PRIVATE Light)
   add_test(NAME foundation COMMAND test_foundation)
 
   add_executable(test_bytecode tests/bytecode/test_encoding.cpp)
-  target_link_libraries(test_bytecode PRIVATE light)
+  target_link_libraries(test_bytecode PRIVATE Light)
   add_test(NAME bytecode COMMAND test_bytecode)
 
   add_executable(test_error tests/error/test_error.cpp)
-  target_link_libraries(test_error PRIVATE light)
+  target_link_libraries(test_error PRIVATE Light)
   add_test(NAME error COMMAND test_error)
 
   add_executable(test_value tests/value/test_value.cpp)
-  target_link_libraries(test_value PRIVATE light)
+  target_link_libraries(test_value PRIVATE Light)
   add_test(NAME value COMMAND test_value)
 
   if(NOT WIN32)

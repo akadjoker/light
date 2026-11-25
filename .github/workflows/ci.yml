@@ -1,24 +1,9 @@
 name: ci
 
 on:
-  pull_request:
-    paths:
-      - '**'
-      - '!README.md'
-      - '!docs/**'
-      - '!plano.md'
-      - '!estudos/**'
-      - '.github/workflows/ci.yml'
   push:
-    branches:
-      - main
-    paths:
-      - '**'
-      - '!README.md'
-      - '!docs/**'
-      - '!plano.md'
-      - '!estudos/**'
-      - '.github/workflows/ci.yml'
+    tags: ['v*']
+  workflow_dispatch:
 
 env:
   ASAN_OPTIONS: halt_on_error=1
